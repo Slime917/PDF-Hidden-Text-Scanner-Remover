@@ -14,8 +14,9 @@ These two Python scripts help review PDF files for suspicious or hidden text tha
 - [6. Verify the setup](#6-verify-the-setup)
 - [7. Use the PDF scanner](#7-use-the-pdf-scanner)
 - [8. Use the PDF remover](#8-use-the-pdf-remover)
-- [9. How the scripts work](#9-how-the-scripts-work)
-- [10. Troubleshooting](#10-troubleshooting)
+- [9. Optional: Run the scripts from any folder](#9-optional-run-the-scripts-from-any-folder)
+- [10. How the scripts work](#10-how-the-scripts-work)
+- [11. Troubleshooting](#11-troubleshooting)
 
 ## 1. What you need
 
@@ -394,7 +395,143 @@ As with the scanner, the requested Tesseract language data must be installed. Th
 - The original PDF is not overwritten. The remover writes a separate `_cleaned.pdf` file.
 - The remover's final selected-finding count is the number of findings you chose; it is not proof that every selected finding was physically removed. In particular, annotation/comment and form-field objects are not deleted by the current implementation.
 
-## 9. How the scripts work
+## 9. Optional: Run the scripts from any folder
+
+Sections 7 and 8 run the scripts from the tools folder and pass the path to the PDF. As an alternative, you can set up two shortcut commands, `pdfscan` and `pdfclean`, so you can change to the folder that contains the PDF and run the tools there without typing the path to the scripts:
+
+```powershell
+cd "D:\Some\Folder\With\PDFs"
+pdfscan .\example.pdf
+pdfclean .\example.pdf
+```
+
+This setup is optional and does not change the scripts. The standard `python pdf_hidden_text_scanner.py ...` and `python pdf_remove_hidden_text.py ...` commands keep working.
+
+### Windows PowerShell
+
+The shortcuts are defined in your PowerShell profile, a script that PowerShell runs each time a new window opens.
+
+1. Find the full path of the tools folder. Change to the folder containing the two scripts and run:
+
+   ```powershell
+   (Get-Location).Path
+   ```
+
+   Copy the path that is printed. For example:
+
+   ```text
+   C:\Users\YourName\Documents\PDF-Hidden-Text-Tools
+   ```
+
+2. Check that PowerShell is allowed to run your profile:
+
+   ```powershell
+   Get-ExecutionPolicy
+   ```
+
+   If the result is `Restricted`, allow local scripts for your Windows user:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+   ```
+
+   If the result is `RemoteSigned`, `Unrestricted`, or `Bypass`, no change is needed.
+
+3. Create your profile file if it does not exist yet, then open it in Notepad:
+
+   ```powershell
+   if (-not (Test-Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force }
+   notepad $PROFILE
+   ```
+
+4. Add these lines to the profile. Replace the path on the first line with the path you copied in step 1:
+
+   ```powershell
+   $PdfTools = "C:\Users\YourName\Documents\PDF-Hidden-Text-Tools"
+   function pdfscan  { python "$PdfTools\pdf_hidden_text_scanner.py" @args }
+   function pdfclean { python "$PdfTools\pdf_remove_hidden_text.py" @args }
+   ```
+
+   If you created the virtual environment from section 4, use its Python instead so the shortcuts work without activating the environment first:
+
+   ```powershell
+   $PdfTools = "C:\Users\YourName\Documents\PDF-Hidden-Text-Tools"
+   function pdfscan  { & "$PdfTools\.venv\Scripts\python.exe" "$PdfTools\pdf_hidden_text_scanner.py" @args }
+   function pdfclean { & "$PdfTools\.venv\Scripts\python.exe" "$PdfTools\pdf_remove_hidden_text.py" @args }
+   ```
+
+5. Save the file and close Notepad.
+
+6. Close PowerShell and open a **new** PowerShell window. The shortcuts are only loaded in windows opened after the profile is saved. To load them into the current window instead, run:
+
+   ```powershell
+   . $PROFILE
+   ```
+
+7. Verify the shortcuts from a different folder:
+
+   ```powershell
+   cd $HOME
+   pdfscan --help
+   pdfclean --help
+   ```
+
+   Each command should display the same usage instructions as the standard commands in section 6.
+
+Notes:
+
+- **PowerShell 7:** PowerShell 7 (`pwsh`) uses a different profile file from Windows PowerShell. To use the shortcuts in both, repeat steps 3 to 6 in each one; `$PROFILE` points to the correct file in each.
+- **Command Prompt:** the shortcuts only work in PowerShell, not in Command Prompt (`cmd`).
+- **Moving the tools folder:** if you move or rename the tools folder, update the `$PdfTools` line in your profile.
+- **Removing the shortcuts:** open the profile with `notepad $PROFILE`, delete the three lines, and open a new PowerShell window.
+
+### macOS or Linux
+
+The same shortcuts can be defined as shell functions in your shell's startup file: `~/.zshrc` for zsh (the macOS default) or `~/.bashrc` for bash (the usual Linux default).
+
+1. Change to the tools folder and run `pwd` to print its full path.
+
+2. Open the startup file in a text editor. For example:
+
+   ```bash
+   nano ~/.zshrc
+   ```
+
+3. Add these lines at the end of the file. Replace the path on the first line with the path printed in step 1:
+
+   ```bash
+   PDF_TOOLS="$HOME/PDF-Hidden-Text-Tools"
+   pdfscan()  { python3 "$PDF_TOOLS/pdf_hidden_text_scanner.py" "$@"; }
+   pdfclean() { python3 "$PDF_TOOLS/pdf_remove_hidden_text.py" "$@"; }
+   ```
+
+   If you created the virtual environment from section 4, replace `python3` with `"$PDF_TOOLS/.venv/bin/python"` on both function lines.
+
+4. Save the file, then open a new terminal or run `source ~/.zshrc` (or `source ~/.bashrc`).
+
+5. Verify the shortcuts from a different folder:
+
+   ```bash
+   cd ~
+   pdfscan --help
+   pdfclean --help
+   ```
+
+### Using the shortcuts
+
+Once the shortcuts are set up, change to the folder containing the PDF and run them with the PDF's filename. All options from sections 7 and 8 work the same way:
+
+```powershell
+pdfscan .\example.pdf
+pdfscan .\example.pdf --no-ocr --overwrite
+pdfscan .\example.pdf --report-json .\example_findings.json
+pdfclean .\example.pdf
+pdfclean .\example.pdf --ocr-language eng+fra
+```
+
+On macOS or Linux, use `./example.pdf` instead of `.\example.pdf`. Reports and cleaned PDFs are still saved beside the PDF, as described in sections 7 and 8.
+
+## 10. How the scripts work
 
 ### `pdf_hidden_text_scanner.py`
 
@@ -423,7 +560,7 @@ After displaying the findings and metrics, it interprets your selection. For sup
 
 Finally, it saves the modified document as a new `_cleaned.pdf` file. The original PDF remains unchanged. Because some scanner findings refer to PDF objects rather than ordinary page text, the remover's current redaction support is narrower than the scanner's detection support; see [Important remover limitations](#important-remover-limitations) before relying on the cleaned file.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 ### `python` or `py` is not recognized
 
@@ -452,6 +589,15 @@ The scripts can still run without OCR. Use `--no-ocr` to disable OCR explicitly.
 ### The remover cannot find the scanner module
 
 Make sure `pdf_hidden_text_scanner.py` is in the same folder as the remover and that its filename has not been changed. Also make sure you run the remover with the correct Python environment activated.
+
+### `pdfscan` or `pdfclean` is not recognized
+
+These shortcuts only exist if you completed [9. Optional: Run the scripts from any folder](#9-optional-run-the-scripts-from-any-folder).
+
+1. Open a **new** PowerShell window or terminal. Windows opened before the profile was saved do not have the shortcuts.
+2. On Windows, run `notepad $PROFILE` and confirm the three lines are in the file that opens. PowerShell 7 and Windows PowerShell use different profile files.
+3. On Windows, if PowerShell reports that running scripts is disabled when it opens, run `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned` and open a new window.
+4. If the shortcut runs but reports that it cannot find a script file, check that the `$PdfTools` (Windows) or `PDF_TOOLS` (macOS/Linux) path matches the folder containing both scripts.
 
 ### A report or cleaned PDF already exists
 
