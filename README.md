@@ -277,8 +277,13 @@ The scanner checks a PDF and displays suspicious findings in the terminal. When 
    python pdf_hidden_text_scanner.py ".\PDFs\example.pdf"
    ```
 
-5. Review the terminal output. Each finding includes a finding number, page number, reason(s), and a copy-ready line containing the flagged text. The document risk score and suspicious span percentage are shown below the findings.
-6. If suspicious findings were detected, look for the generated report beside the PDF. The default name is:
+5. While the scan runs, a coloured progress bar updates in the terminal (interactive terminals only).
+6. Review the terminal output. When findings exist, each one is shown in a bordered table with yellow column headers (`#`, `Page`, `Reason`), a blue `FINDINGS` heading, and a copy-ready flagged-text line. Below the findings (or below the progress bar on a clean scan), a blue `Verdict` heading introduces the two metrics:
+   - **Document risk score** and **Suspicious span percentage** labels are bold bright white.
+   - The percentage values are coloured by level: green below 20%, yellow from 20% up to but not including 40%, orange from 40% up to but not including 70%, and red at 70% or higher.
+   - If the scan finds nothing, a green `No scanner findings detected.` message is printed.
+   - If one or more findings include the reason `Covered by a later page object`, a bold orange advisory appears under the span percentage: manual review is strongly advised before cleaning.
+7. If suspicious findings were detected, look for the generated report beside the PDF. The default name is:
 
    ```text
    example_hidden_text_report.txt
@@ -339,7 +344,7 @@ The TXT report is normally created only when findings are detected. If you appro
 
 ## 8. Use the PDF remover
 
-The remover runs the scanner's analysis, displays findings in the same terminal layout, and asks which findings to remove. It also looks for recurring headers and footers.
+The remover runs the scanner's analysis, displays findings in the same terminal layout (progress bar, findings table, `Verdict` metrics, and any covered-object advisory), and asks which findings to remove. It also looks for recurring headers and footers.
 
 1. Make sure both scripts are in the same folder and the virtual environment is active.
 2. Run the remover with the PDF path. For example:
@@ -348,27 +353,28 @@ The remover runs the scanner's analysis, displays findings in the same terminal 
    python pdf_remove_hidden_text.py ".\PDFs\example.pdf"
    ```
 
-3. Review the findings and the two metrics printed below them.
-4. At the selection prompt, choose what to remove:
+3. Review the findings and the `Verdict` metrics printed below them. The colours and covered-object advisory match the scanner.
+4. At the blue `Removal selection:` prompt, choose what to remove:
 
    | Input | Action |
    |---|---|
    | Press Enter | Remove all scanner findings that the remover supports removing |
    | `in 1,2,4` | Remove only findings 1, 2, and 4 |
    | `ex 3,4` | Remove all findings except 3 and 4 |
-   | `q` | Cancel without creating a cleaned PDF |
+   | `q` | Cancel without creating a cleaned PDF (`Cancelled;` in red, `source PDF unchanged.` in green) |
 
-   Finding numbers correspond to the numbered findings displayed in the terminal. Separate multiple numbers with commas.
+   Finding numbers correspond to the numbered findings displayed in the terminal. Separate multiple numbers with commas. The `Selection:` prompt is also shown in blue.
 
-5. The cleaned copy is saved beside the original PDF using this filename pattern:
+5. After a successful clean, the remover prints a short coloured summary: green `Cleaned PDF saved:` (path in default white), red labels for the selected-finding and header/footer removal counts (counts in default white), and green `Original PDF was not modified.`
+6. The cleaned copy is saved beside the original PDF using this filename pattern:
 
    ```text
    example_cleaned.pdf
    ```
 
-6. Open the cleaned PDF and check the pages to confirm that the intended content was removed and that nearby visible content is still correct.
+7. Open the cleaned PDF and check the pages to confirm that the intended content was removed and that nearby visible content is still correct.
 
-If a cleaned output with that name already exists, the remover asks whether to overwrite it. Enter `y` or `yes` to replace it. Press Enter or enter anything else to cancel; the default is No.
+If a cleaned output with that name already exists, the remover asks `Overwrite cleaned PDF? [y/N]:` in blue. Enter `y` or `yes` to replace it. Press Enter or enter anything else to cancel (`Cancelled.` in red); the default is No.
 
 ### Remover options
 
@@ -550,15 +556,17 @@ For ordinary page text, it combines several kinds of evidence, including:
 
 Each finding receives a heuristic score based on the evidence signals that apply to it. The **Document risk score** is the highest individual finding score in the document; it is not a calibrated probability that the PDF is malicious. The **Suspicious span percentage** is the number of flagged text units divided by the total extracted text units, expressed as a percentage. It is a measure of how many extracted units were flagged, not the percentage of page area or characters that are suspicious.
 
-The scanner prints a bordered findings table and copy-ready flagged text in the terminal. When findings exist and report writing is enabled, it also writes a detailed TXT report. A JSON report can be requested separately with `--report-json`. The source PDF is not modified.
+During analysis, an interactive terminal shows a coloured progress bar that advances through the page passes. After analysis, the scanner prints a bordered findings table and copy-ready flagged text when findings exist, then a blank-separated blue `Verdict` block with the two metrics. Percentage values use a green / yellow / orange / red scale. A clean scan prints green `No scanner findings detected.` If any finding includes `Covered by a later page object`, a bold orange advisory is printed under the span percentage. Colours are omitted when output is not a terminal, or when `NO_COLOR` is set; `FORCE_COLOR` can force colour on.
+
+When findings exist and report writing is enabled, the scanner also writes a detailed TXT report. A JSON report can be requested separately with `--report-json`. The source PDF is not modified.
 
 ### `pdf_remove_hidden_text.py`
 
-The remover imports `pdf_hidden_text_scanner.py` and calls its analysis function, so it uses the same detection logic, finding order, and terminal findings formatter. It uses a temporary directory for the scanner's intermediate TXT report and removes that temporary directory after analysis; it does not create a persistent scanner TXT report.
+The remover imports `pdf_hidden_text_scanner.py` and calls its analysis function, so it uses the same detection logic, finding order, progress bar, findings formatter, `Verdict` metrics, and covered-object advisory. It uses a temporary directory for the scanner's intermediate TXT report and removes that temporary directory after analysis; it does not create a persistent scanner TXT report.
 
-After displaying the findings and metrics, it interprets your selection. For supported page-text findings, it uses the finding's bounding box to place a PDF redaction annotation and applies the redaction to the output document. It separately detects recurring header/footer spans using the page-edge and repetition heuristic described above, then redacts those spans as well.
+After displaying the findings and metrics, it shows the blue interactive removal prompts, then interprets your selection. For supported page-text findings, it uses the finding's bounding box to place a PDF redaction annotation and applies the redaction to the output document. It separately detects recurring header/footer spans using the page-edge and repetition heuristic described above, then redacts those spans as well.
 
-Finally, it saves the modified document as a new `_cleaned.pdf` file. The original PDF remains unchanged. Because some scanner findings refer to PDF objects rather than ordinary page text, the remover's current redaction support is narrower than the scanner's detection support; see [Important remover limitations](#important-remover-limitations) before relying on the cleaned file.
+Finally, it saves the modified document as a new `_cleaned.pdf` file and prints the coloured success summary. The original PDF remains unchanged. Because some scanner findings refer to PDF objects rather than ordinary page text, the remover's current redaction support is narrower than the scanner's detection support; see [Important remover limitations](#important-remover-limitations) before relying on the cleaned file.
 
 ## 11. Troubleshooting
 

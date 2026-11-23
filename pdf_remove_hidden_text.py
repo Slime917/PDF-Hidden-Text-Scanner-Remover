@@ -80,9 +80,11 @@ def main():
     output = source.with_name(source.stem + "_cleaned.pdf")
     if output.exists():
         print(f"Output already exists: {output}")
-        answer = input("Overwrite cleaned PDF? [y/N]: ").strip().casefold()
+        answer = input(
+            scanner.colorize("Overwrite cleaned PDF? [y/N]: ", scanner.COLOR_BLUE)
+        ).strip().casefold()
         if answer not in {"y", "yes"}:
-            print("Cancelled.")
+            print(scanner.colorize("Cancelled.", scanner.COLOR_RED))
             return 1
 
     # Use a temporary report path because analyze_pdf is the scanner's public analysis core.
@@ -94,27 +96,32 @@ def main():
     # Keep selection numbers aligned with the scanner's displayed page/reading order.
     findings = scanner._sorted_findings(findings)
     print_findings(findings)
-    if findings:
-        print()
     # Match the scanner's terminal summary exactly and place it immediately
     # below the findings, before the interactive removal-selection prompt.
-    print(f"Document risk score: {score:.1f}%")
-    print(f"Suspicious span percentage: {span_percentage:.3f}%")
-    if not findings:
-        print("No scanner findings detected.")
-    print("\nRemoval selection:")
+    scanner.print_terminal_metrics(
+        score, span_percentage, findings=findings, findings_empty=not findings
+    )
+    print()
+    print(scanner.colorize("Removal selection:", scanner.COLOR_BLUE))
     print("  Enter = remove all scanner findings")
     print("  in 1,2,4 = remove only these finding numbers")
     print("  ex 3,4 = remove all findings except these")
     print("  q = cancel")
     while True:
         try:
-            selection = parse_selection(input("Selection: "), len(findings))
+            selection = parse_selection(
+                input(scanner.colorize("Selection: ", scanner.COLOR_BLUE)),
+                len(findings),
+            )
             break
         except ValueError as e:
             print(e)
     if selection is None:
-        print("Cancelled; source PDF unchanged.")
+        print(
+            scanner.colorize("Cancelled;", scanner.COLOR_RED)
+            + " "
+            + scanner.colorize("source PDF unchanged.", scanner.COLOR_GREEN)
+        )
         return 0
 
     # Findings are 1-based; redact page-text findings only. Other finding types
@@ -143,10 +150,17 @@ def main():
             temp_out.unlink()
         doc.save(str(temp_out), garbage=4, deflate=True)
     temp_out.replace(output)
-    print(f"\nCleaned PDF saved: {output}")
-    print(f"Selected findings removed: {len(chosen)}")
-    print(f"Recurring header/footer text spans removed: {len(header_footer)}")
-    print("Original PDF was not modified.")
+    print()
+    print(scanner.colorize("Cleaned PDF saved:", scanner.COLOR_GREEN) + f" {output}")
+    print(
+        scanner.colorize("Selected findings removed:", scanner.COLOR_RED)
+        + f" {len(chosen)}"
+    )
+    print(
+        scanner.colorize("Recurring header/footer text spans removed:", scanner.COLOR_RED)
+        + f" {len(header_footer)}"
+    )
+    print(scanner.colorize("Original PDF was not modified.", scanner.COLOR_GREEN))
     return 0
 
 if __name__ == "__main__":

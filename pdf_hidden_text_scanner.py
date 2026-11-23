@@ -229,6 +229,134 @@ def safe_untrusted_text(value: Any) -> str:
     return "".join(output)
 
 
+# ---------------------------- Terminal colours ---------------------------- #
+
+_ANSI_RESET = "\033[0m"
+COLOR_BLUE = "\033[94m"
+COLOR_RED = "\033[91m"
+COLOR_ORANGE = "\033[38;5;208m"
+COLOR_ORANGE_BOLD = "\033[1;38;5;208m"
+COLOR_YELLOW = "\033[93m"
+COLOR_GREEN = "\033[92m"
+COLOR_CYAN = "\033[96m"
+COLOR_MAGENTA = "\033[95m"
+COLOR_WHITE_BOLD = "\033[1;97m"
+_WINDOWS_ANSI_ENABLED = False
+
+
+def _enable_windows_ansi() -> None:
+    """Turn on VT processing so ANSI colours work in Windows consoles."""
+    global _WINDOWS_ANSI_ENABLED
+    if _WINDOWS_ANSI_ENABLED or sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        handle = ctypes.windll.kernel32.GetStdHandle(-11)
+        mode = ctypes.c_uint32()
+        if ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            ctypes.windll.kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+        _WINDOWS_ANSI_ENABLED = True
+    except Exception:
+        pass
+
+
+def terminal_color_enabled() -> bool:
+    """Return True when coloured terminal output should be used."""
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        _enable_windows_ansi()
+        return True
+    if not sys.stdout.isatty():
+        return False
+    _enable_windows_ansi()
+    return True
+
+
+def colorize(text: str, ansi_code: str) -> str:
+    """Wrap ``text`` in an ANSI colour when the terminal supports it."""
+    if not terminal_color_enabled():
+        return text
+    return f"{ansi_code}{text}{_ANSI_RESET}"
+
+
+def percentage_ansi_color(percentage: float) -> str:
+    """Pick a risk colour: red >=70, orange >=40, yellow >=20, else green."""
+    if percentage >= 70.0:
+        return COLOR_RED
+    if percentage >= 40.0:
+        return COLOR_ORANGE
+    if percentage >= 20.0:
+        return COLOR_YELLOW
+    return COLOR_GREEN
+
+
+def progress_ansi_color(fraction: float) -> str:
+    """Colour a loading bar by completion: yellow, cyan, then green."""
+    if fraction >= 0.70:
+        return COLOR_GREEN
+    if fraction >= 0.40:
+        return COLOR_CYAN
+    return COLOR_YELLOW
+
+
+def _clear_scan_progress_line() -> None:
+    if not sys.stdout.isatty():
+        return
+    print("\r" + (" " * 80) + "\r", end="", flush=True)
+
+
+def update_scan_progress(current: int, total: int, *, label: str = "Scanning PDF") -> None:
+    """Redraw an in-place coloured progress bar for the active PDF scan."""
+    # Progress uses carriage returns, so only draw it on a live interactive terminal.
+    if total <= 0 or not sys.stdout.isatty() or not terminal_color_enabled():
+        return
+    fraction = min(1.0, max(0.0, current / total))
+    width = 36
+    filled = int(round(width * fraction))
+    empty = width - filled
+    bar = ("█" * filled) + ("░" * empty)
+    coloured_bar = colorize(bar, progress_ansi_color(fraction))
+    print(f"\r{label}: [{coloured_bar}] {fraction * 100:5.1f}%", end="", flush=True)
+    if current >= total:
+        print(flush=True)
+
+
+def print_terminal_metrics(
+    score: float,
+    span_percentage: float,
+    *,
+    findings: Optional[list[Finding]] = None,
+    findings_empty: bool = False,
+) -> None:
+    """Print document metrics; labels are bold bright white, percentages keep risk colours."""
+    # Always blank-line before Verdict so it stays separated from findings or the progress bar.
+    print()
+    print(colorize("Verdict", COLOR_BLUE))
+    print(
+        colorize("Document risk score:", COLOR_WHITE_BOLD)
+        + " "
+        + colorize(f"{score:.1f}%", percentage_ansi_color(score))
+    )
+    print(
+        colorize("Suspicious span percentage:", COLOR_WHITE_BOLD)
+        + " "
+        + colorize(f"{span_percentage:.3f}%", percentage_ansi_color(span_percentage))
+    )
+    findings_list = findings or []
+    if any("covered_by_later_page_object" in finding.reasons for finding in findings_list):
+        print(
+            colorize(
+                '"Covered by a later page object" was the reason for one or more finding. '
+                "Manual review strongly advised before cleaning.",
+                COLOR_ORANGE_BOLD,
+            )
+        )
+    if findings_empty:
+        print(colorize("No scanner findings detected.", COLOR_GREEN))
+
+
 def _normalized_output_path(path: str | Path) -> Path:
     """Normalize the parent while not following a possibly hostile output symlink."""
     candidate = Path(path).expanduser()
@@ -1017,9 +1145,11 @@ def format_findings_ascii_table(findings: list[Finding], *, color_terminal_label
         header_height = max(len(cell) for cell in header_cells)
         for line_index in range(header_height):
             cells = [cell[line_index] if line_index < len(cell) else "" for cell in header_cells]
-            lines.append(
-                "| " + " | ".join(value.ljust(width) for value, width in zip(cells, widths)) + " |"
-            )
+            # Pad before colouring so ANSI codes do not break column alignment.
+            padded_headers = [value.ljust(width) for value, width in zip(cells, widths)]
+            if color_terminal_label:
+                padded_headers = [colorize(cell, COLOR_YELLOW) for cell in padded_headers]
+            lines.append("| " + " | ".join(padded_headers) + " |")
         lines.append(border())
 
         values = (str(number), str(finding.page), _finding_reason_text(finding))
@@ -1163,6 +1293,11 @@ def analyze_pdf(
             # omitted because it belongs to an OFF optional-content group.
             page_cache: list[tuple[list[dict[str, Any]], list[dict[str, Any]]]] = []
             all_sizes: list[float] = []
+            page_count = len(analysis_doc)
+            progress_total = max(1, page_count * 2)
+            progress_step = 0
+            update_scan_progress(progress_step, progress_total)
+
             for page in analysis_doc:
                 spans, traces = collect_page_spans(page)
                 page_cache.append((spans, traces))
@@ -1181,6 +1316,8 @@ def analyze_pdf(
                     size = float(span.get("size", 0.0) or 0.0)
                     if size > 0:
                         all_sizes.append(size)
+                progress_step += 1
+                update_scan_progress(progress_step, progress_total)
 
             document_median = statistics.median(all_sizes) if all_sizes else 0.0
 
@@ -1346,6 +1483,11 @@ def analyze_pdf(
                     raise ValueError(
                         f"PDF exceeds the {MAX_EXTRACTED_CHARACTERS:,}-character extraction safety limit."
                     )
+                progress_step += 1
+                update_scan_progress(progress_step, progress_total)
+        except Exception:
+            _clear_scan_progress_line()
+            raise
         finally:
             if inspection_doc is not None:
                 inspection_doc.close()
@@ -1423,7 +1565,7 @@ def print_terminal_findings(findings: list[Finding]) -> None:
     """Print findings with copy-ready text; metrics are printed separately last."""
     if not findings:
         return
-    print("FINDINGS")
+    print(colorize("FINDINGS", COLOR_BLUE))
     print("\n".join(format_findings_ascii_table(findings, color_terminal_label=True)))
 
 
@@ -1514,10 +1656,9 @@ def main() -> int:
         return 2
 
     print_terminal_findings(findings)
-    if findings:
-        print()
-    print(f"Document risk score: {score:.1f}%")
-    print(f"Suspicious span percentage: {span_percentage:.3f}%")
+    print_terminal_metrics(
+        score, span_percentage, findings=findings, findings_empty=not findings
+    )
 
     return 0
 
